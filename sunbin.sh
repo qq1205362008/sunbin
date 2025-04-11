@@ -96,7 +96,6 @@ install_base() {
 	systemctl disable httpd.service >/dev/null 2>&1
 	service apache2 stop >/dev/null 2>&1
 	systemctl disable apache2 >/dev/null 2>&1
-	fi
 	
 	
 	
