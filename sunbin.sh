@@ -64,7 +64,7 @@ install_base() {
         dnf -y update && dnf install -y -q wget curl tar tzdata
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
+        pacman -Syu --noconfirm wget curl tar tzdata
         ;;
     opensuse-tumbleweed)
         zypper refresh && zypper -q install -y wget curl tar timezone
@@ -72,34 +72,27 @@ install_base() {
     *)
         apt-get update && apt install -y -q wget curl tar tzdata
         ;;
-
-
-
     esac
-	
 
-	echo -e "${green}关闭防火墙，开放所有端口规则……${plain}"
-	sleep 1
-	systemctl stop firewalld.service >/dev/null 2>&1
-	systemctl disable firewalld.service >/dev/null 2>&1
-	setenforce 0 >/dev/null 2>&1
-	ufw disable >/dev/null 2>&1
-	iptables -P INPUT ACCEPT >/dev/null 2>&1
-	iptables -P FORWARD ACCEPT >/dev/null 2>&1
-	iptables -P OUTPUT ACCEPT >/dev/null 2>&1
-	iptables -t mangle -F >/dev/null 2>&1
-	iptables -F >/dev/null 2>&1
-	iptables -X >/dev/null 2>&1
-	netfilter-persistent save >/dev/null 2>&1
-	if [[ -n $(apachectl -v 2>/dev/null) ]]; then
-	systemctl stop httpd.service >/dev/null 2>&1
-	systemctl disable httpd.service >/dev/null 2>&1
-	service apache2 stop >/dev/null 2>&1
-	systemctl disable apache2 >/dev/null 2>&1
-	
-	
-	
-	
+    echo -e "${green}关闭防火墙，开放所有端口规则……${plain}"
+    sleep 1
+    systemctl stop firewalld.service >/dev/null 2>&1
+    systemctl disable firewalld.service >/dev/null 2>&1
+    setenforce 0 >/dev/null 2>&1
+    ufw disable >/dev/null 2>&1
+    iptables -P INPUT ACCEPT >/dev/null 2>&1
+    iptables -P FORWARD ACCEPT >/dev/null 2>&1
+    iptables -P OUTPUT ACCEPT >/dev/null 2>&1
+    iptables -t mangle -F >/dev/null 2>&1
+    iptables -F >/dev/null 2>&1
+    iptables -X >/dev/null 2>&1
+    netfilter-persistent save >/dev/null 2>&1
+    if [[ -n $(apachectl -v 2>/dev/null) ]]; then
+        systemctl stop httpd.service >/dev/null 2>&1
+        systemctl disable httpd.service >/dev/null 2>&1
+        service apache2 stop >/dev/null 2>&1
+        systemctl disable apache2 >/dev/null 2>&1
+    fi
 }
 
 gen_random_string() {
@@ -197,7 +190,7 @@ install_x-ui() {
         echo -e "Beginning to install x-ui $1"
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
+            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}
             exit 1
         fi
     fi
