@@ -77,7 +77,6 @@ install_base() {
 
     esac
 	
-	fi
 
 	echo -e "${green}关闭防火墙，开放所有端口规则……${plain}"
 	sleep 1
