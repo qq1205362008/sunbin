@@ -23,7 +23,9 @@ $su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config;
 $su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config;
 $su service sshd restart
 else
-
+    echo "Failed to check the system OS, please contact the author!" >&2
+    exit 1
+fi
 echo "The OS release is: $release"
 
 arch() {
