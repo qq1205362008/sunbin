@@ -112,17 +112,14 @@ install_base() {
 	service apache2 stop >/dev/null 2>&1
 	systemctl disable apache2 >/dev/null 2>&1
 	fi
-
 }
 
-#This function will be called when user installed x-ui out of sercurity
 config_after_install() {
-        config_account=1399
-        config_password=1399
-        config_port=1399
-        /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
-        /usr/local/x-ui/x-ui setting -port ${config_port}
-	
+    config_account=1399
+    config_password=1399
+    config_port=1399
+    /usr/local/x-ui/x-ui setting -username ${config_account} -password ${config_password}
+    /usr/local/x-ui/x-ui setting -port ${config_port}
 }
 
 install_x-ui() {
@@ -130,15 +127,11 @@ install_x-ui() {
     cd /usr/local/
 
     if [ $# == 0 ]; then
-        last_version=$(curl -Ls "https://api.github.com/repos/FranzKafkaYu/x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$last_version" ]]; then
-            echo -e "${red}检测 x-ui 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 x-ui 版本安装${plain}"
-            exit 1
-        fi
-        echo -e "检测到 x-ui 最新版本：${last_version}，开始安装"
+        last_version="v25.3.6"  # 强制锁定v25.3.6版本
+        echo -e "${green}已选择 x-ui 版本：${last_version}，开始安装${plain}"
         wget -N --no-check-certificate -O /usr/local/x-ui-linux-${arch}.tar.gz https://github.com/FranzKafkaYu/x-ui/releases/download/${last_version}/x-ui-linux-${arch}.tar.gz
         if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 x-ui 失败，请确保你的服务器能够下载 Github 的文件${plain}"
+            echo -e "${red}下载 x-ui 失败，请确保此版本存在且网络正常${plain}"
             exit 1
         fi
     else
@@ -165,24 +158,16 @@ install_x-ui() {
     chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
     config_after_install
-    #echo -e "如果是全新安装，默认网页端口为 ${green}54321${plain}，用户名和密码默认都是 ${green}admin${plain}"
-    #echo -e "请自行确保此端口没有被其他程序占用，${yellow}并且确保 54321 端口已放行${plain}"
-    #    echo -e "若想将 54321 修改为其它端口，输入 x-ui 命令进行修改，同样也要确保你修改的端口也是放行的"
-    #echo -e ""
-    #echo -e "如果是更新面板，则按你之前的方式访问面板"
-    #echo -e ""
 	
-	v4=$(curl -s4m6 ip.sb -k)
-	v6=$(curl -s6m6 ip.sb -k)
-	if [[ -z $v4 ]]; then
-		int="${green}请在浏览器地址栏复制${plain}  ${bblue}[$v6]:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
-	elif [[ -n $v4 && -n $v6 ]]; then
-		int="${green}请在浏览器地址栏复制${plain}  ${bblue}$v4:$config_port${plain}  ${yellow}或者${plain}  ${bblue}[$v6]:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
-	else
-		int="${green}请在浏览器地址栏复制${plain}  ${bblue}$v4:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
-	fi
-	
-	
+    v4=$(curl -s4m6 ip.sb -k)
+    v6=$(curl -s6m6 ip.sb -k)
+    if [[ -z $v4 ]]; then
+        int="${green}请在浏览器地址栏复制${plain}  ${bblue}[$v6]:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
+    elif [[ -n $v4 && -n $v6 ]]; then
+        int="${green}请在浏览器地址栏复制${plain}  ${bblue}$v4:$config_port${plain}  ${yellow}或者${plain}  ${bblue}[$v6]:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
+    else
+        int="${green}请在浏览器地址栏复制${plain}  ${bblue}$v4:$config_port${plain}  ${green}进入x-ui登录界面\n当前x-ui登录用户名：${plain}${bblue}${config_account}${plain}${green} \n当前x-ui登录密码：${plain}${bblue}${config_password}${plain}"
+    fi
 	
     systemctl daemon-reload
     systemctl enable x-ui
