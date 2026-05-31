@@ -7,7 +7,7 @@ blue='\033[0;34m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
-# 当前目录（虽然脚本中未使用）
+# 当前目录
 cur_dir=$(pwd)
 
 # 检查root权限
@@ -45,7 +45,6 @@ else
         echo "Failed to check the system OS, please contact the author!" >&2
         exit 1
     fi
-    # 这里只保留一个输出
     echo "The OS release is: $release"
 fi
 
@@ -88,136 +87,4 @@ install_base() {
     fedora | amzn | virtuozzo)
         dnf -y update && dnf install -y -q wget curl tar tzdata
         ;;
-    arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
-        ;;
-    opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone
-        ;;
-    *)
-        apt-get update && apt install -y -q wget curl tar tzdata
-        ;;
-    esac
-}
-
-config_after_install() {
-    # 使用旧脚本的固定配置
-    config_account="1399"
-    config_password="1399"
-    config_port="1399"
-    config_webBasePath=""  # 保持与旧脚本类似的随机路径
-    
-    /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
-    
-    # 获取服务器IP
-    server_ip=$(curl -s https://api.ipify.org)
-    
-    echo -e "###############################################"
-    echo -e "${green}Username: ${config_account}${plain}"
-    echo -e "${green}Password: ${config_password}${plain}"
-    echo -e "${green}Port: ${config_port}${plain}"
-    echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
-    echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
-    echo -e "###############################################"
-    echo -e "${yellow}If you forgot your login info, you can type 'x-ui settings' to check${plain}"
-    
-    /usr/local/x-ui/x-ui migrate
-}
-
-install_x-ui() {
-    cd /usr/local/
-
-    if [ $# == 0 ]; then
-        tag_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-        if [[ ! -n "$tag_version" ]]; then
-            echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
-            exit 1
-        fi
-        echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
-            exit 1
-        fi
-    else
-        tag_version=$1
-        tag_version_numeric=${tag_version#v}
-        min_version="2.3.5"
-
-        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
-            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
-            exit 1
-        fi
-
-        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning to install x-ui $1"
-        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
-            exit 1
-        fi
-    fi
-
-    if [[ -e /usr/local/x-ui/ ]]; then
-        systemctl stop x-ui
-        rm /usr/local/x-ui/ -rf
-    fi
-
-    tar zxvf x-ui-linux-$(arch).tar.gz
-    rm x-ui-linux-$(arch).tar.gz -f
-    cd x-ui
-    chmod +x x-ui
-
-    # Check the system's architecture and rename the file accordingly
-    if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
-        mv bin/xray-linux-$(arch) bin/xray-linux-arm
-        chmod +x bin/xray-linux-arm
-    fi
-
-    chmod +x x-ui bin/xray-linux-$(arch)
-    
-    # ======= 修复的服务文件复制逻辑 =======
-    if [[ -f x-ui.service ]]; then
-        cp -f x-ui.service /etc/systemd/system/
-    elif [[ -f x-ui.service.debian ]]; then
-        cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
-    elif [[ -f x-ui.service.rhel ]]; then
-        cp -f x-ui.service.rhel /etc/systemd/system/x-ui.service
-    elif [[ -f x-ui.service.arch ]]; then
-        cp -f x-ui.service.arch /etc/systemd/system/x-ui.service
-    fi
-    # ===================================
-
-    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
-    chmod +x /usr/local/x-ui/x-ui.sh
-    chmod +x /usr/bin/x-ui
-    config_after_install
-
-    systemctl daemon-reload
-    systemctl enable x-ui
-    systemctl start x-ui
-    echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
-    echo -e ""
-    echo -e "┌───────────────────────────────────────────────────────┐
-│  x-ui control menu usages (subcommands):              │
-│                                                       │
-│  x-ui              - 显示管理主菜单（功能最全          │
-│  x-ui start        - 启动x-ui面板服务                             │
-│  x-ui stop         - 停止x-ui面板服务                             │
-│  x-ui restart      - 重启x-ui面板服务                           │
-│  x-ui status       - 查看x-ui运行状态                    │
-│  x-ui settings     - 查看当前配置（含登录凭证                  │
-│  x-ui enable       - 设置开机自动启动   │
-│  x-ui disable      - 取消开机自动启动  │
-│  x-ui log          - 查看实时运行日志                       │
-│  x-ui banlog       - 查看被封禁IP记录（Fail2ban日志）           │
-│  x-ui update       - 更新x-ui到最新版本                            │
-│  x-ui legacy       - 切换回旧版客户端                    │
-│  x-ui install      - 全新安装x-ui                           │
-│  x-ui uninstall    - 完全卸载x-ui                       │
-└───────────────────────────────────────────────────────┘"
-}
-
-echo -e "${green}Running...${plain}"
-install_base
-install_x-ui $1
+    arch
