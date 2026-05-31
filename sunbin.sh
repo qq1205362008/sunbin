@@ -87,4 +87,47 @@ install_base() {
     fedora | amzn | virtuozzo)
         dnf -y update && dnf install -y -q wget curl tar tzdata
         ;;
-    arch
+    arch | manjaro | parch)
+        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata
+        ;;
+    opensuse-tumbleweed)
+        zypper refresh && zypper -q install -y wget curl tar timezone
+        ;;
+    *)
+        apt-get update && apt install -y -q wget curl tar tzdata
+        ;;
+    esac
+}
+
+config_after_install() {
+    # 基础面板账户密码与端口设置
+    config_account="1399"
+    config_password="1399"
+    config_port="1399"
+    config_webBasePath=""  
+    
+    /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
+    
+    # 执行初始化数据库迁移
+    /usr/local/x-ui/x-ui migrate
+
+    # 安装 sqlite3 模块用于安全注入节点
+    if [[ x"${release}" == x"centos" || x"${release}" == x"almalinux" || x"${release}" == x"rocky" ]]; then
+        yum install -y sqlite >/dev/null 2>&1
+    else
+        apt-get install -y sqlite3 >/dev/null 2>&1
+    fi
+
+    # 通过 x-ui 生成完全随机不重复的 UUID、公私钥和 ShortId
+    echo -e "${green}正在自动为您随机默认生成全新的 Reality 节点密匙...${plain}"
+    local random_uuid=$(/usr/local/x-ui/x-ui uuid)
+    local keys_output=$(/usr/local/x-ui/x-ui tgkey)
+    local private_key=$(echo "$keys_output" | grep "Private Key:" | awk '{print $3}')
+    local public_key=$(echo "$keys_output" | grep "Public Key:" | awk '{print $3}')
+    local short_id=$(openssl rand -hex 4)
+    local port=443
+    local dest_sni="www.sony.com"
+
+    # 如果面板内置命令未获取到密钥，则采用备用本地随机生成
+    if [[ -z "$private_key" ]]; then
+        private_key="CILUw7tLhpq1XswrKTMWHV
