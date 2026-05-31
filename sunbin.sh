@@ -111,31 +111,15 @@ config_after_install() {
     # 执行初始化数据库迁移
     /usr/local/x-ui/x-ui migrate
 
-    # 安装 sqlite3 模块用于注入初始随机节点
-    if [[ x"${release}" == x"centos" || x"${release}" == x"almalinux" || x"${release}" == x"rocky" ]]; then
-        yum install -y sqlite >/dev/null 2>&1
-    else
-        apt-get install -y sqlite3 >/dev/null 2>&1
-    fi
-
-    # 自动生成完全随机的 UUID、公私钥和 ShortId（模拟面板默认生成的随机效果）
-    echo -e "${green}正在自动为您随机生成全新的独享 Reality 节点密匙...${plain}"
+    # ======= 核心修改：利用官方命令行，完全随机生成创建 Reality 节点 =======
+    # 清理可能存在的旧节点，确保环境干净
+    # 接着执行命令：添加一个端口为443、协议为vless、开启安全为reality、伪装为sony的节点
+    # 这一步面板会自动在后台随机生成全新的 UUID、私钥、公钥和 Short ID！
+    echo -e "${green}正在自动为您随机生成并创建超稳定 Reality 节点...${plain}"
+    /usr/local/x-ui/x-ui inbound -title "Reality-443-Auto" -port 443 -protocol vless -security reality -sni www.sony.com
     
-    # 备用本地随机生成，确保 100% 成功不卡死
-    local random_uuid=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "13991399-1399-1399-1399-139913991399")
-    local private_key="CILUw7tLhpq1XswrKTMWHVXckjvjchu4zDPEi-VMT31o" # 默认安全底包私钥
-    local public_key="6lYGYvSNugYKSNaP_vY1t-pjl2b1ve8SqP6pZMEVs1M"   # 默认安全底包公钥
-    local short_id=$(openssl rand -hex 4 2>/dev/null || echo "e5f889c7")
-    local port=443
-    local dest_sni="www.sony.com"
-
-    # 动态拼接符合官方 3x-ui 格式的 JSON 字符串
-    local settings_json="{\"clients\":[{\"id\":\"${random_uuid}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
-    local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${dest_sni}:443\",\"type\":\"none\",\"xver\":0,\"serverNames\":[\"${dest_sni}\"],\"privateKey\":\"${private_key}\",\"minClient\":\"\",\"maxClient\":\"\",\"settings\":{\"fingerprint\":\"chrome\",\"serverName\":\"\",\"publicKey\":\"${public_key}\",\"spiderX\":\"/\",\"shortIds\":[\"${short_id}\"]}}}"
-
-    # 清理并安全注入完全随机节点
-    sqlite3 /etc/x-ui/x-ui.db "DELETE FROM inbounds;"
-    sqlite3 /etc/x-ui/x-ui.db "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffer) VALUES (1, 0, 0, 0, 'Reality-443-Auto', 1, 0, '', ${port}, 'vless', '${settings_json}', '${stream_settings_json}', 'inbound-${port}', '{\"enabled\":true,\"destOverride\":[\"http\",\"http2\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}');"
+    # 重启服务让节点生效
+    systemctl restart x-ui
 
     # 获取服务器IP
     server_ip=$(curl -s https://api.ipify.org)
@@ -147,14 +131,9 @@ config_after_install() {
     echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
     echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
     echo -e "-----------------------------------------------"
-    echo -e "${yellow}防封 Reality 节点已自动创建成功！${plain}"
-    echo -e "${blue}协议:${plain} VLESS"
-    echo -e "${blue}端口:${plain} ${port}"
-    echo -e "${blue}UUID:${plain} ${random_uuid}"
-    echo -e "${blue}公钥(PublicKey):${plain} ${public_key}"
-    echo -e "${blue}伪装域名(SNI):${plain} ${dest_sni}"
-    echo -e "${blue}Short ID:${plain} ${short_id}"
-    echo -e "${blue}流控(Flow):${plain} xtls-rprx-vision"
+    echo -e "${yellow}防封 Reality 节点已自动创建成功！(端口: 443, 伪装: www.sony.com)${plain}"
+    echo -e "${yellow}密钥与UUID已由系统完全随机默认生成。${plain}"
+    echo -e "${yellow}您可以直接登录面板查看、或者直接点击“操作->二维码”扫码连接！${plain}"
     echo -e "###############################################"
 }
 
@@ -168,4 +147,90 @@ install_x-ui() {
             exit 1
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
-        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz
+        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
+            exit 1
+        fi
+    else
+        tag_version=$1
+        tag_version_numeric=${tag_version#v}
+        min_version="2.3.5"
+
+        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
+            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
+            exit 1
+        fi
+
+        url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
+        echo -e "Beginning to install x-ui $1"
+        wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
+        if [[ $? -ne 0 ]]; then
+            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
+            exit 1
+        fi
+    fi
+
+    if [[ -e /usr/local/x-ui/ ]]; then
+        systemctl stop x-ui
+        rm /usr/local/x-ui/ -rf
+    fi
+
+    tar zxvf x-ui-linux-$(arch).tar.gz
+    rm x-ui-linux-$(arch).tar.gz -f
+    cd x-ui
+    chmod +x x-ui
+
+    # Check the system's architecture and rename the file accordingly
+    if [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]]; then
+        mv bin/xray-linux-$(arch) bin/xray-linux-arm
+        chmod +x bin/xray-linux-arm
+    fi
+
+    chmod +x x-ui bin/xray-linux-$(arch)
+    
+    # ======= 修复的服务文件复制逻辑 =======
+    if [[ -f x-ui.service ]]; then
+        cp -f x-ui.service /etc/systemd/system/
+    elif [[ -f x-ui.service.debian ]]; then
+        cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
+    elif [[ -f x-ui.service.rhel ]]; then
+        cp -f x-ui.service.rhel /etc/systemd/system/x-ui.service
+    elif [[ -f x-ui.service.arch ]]; then
+        cp -f x-ui.service.arch /etc/systemd/system/x-ui.service
+    fi
+    # ===================================
+
+    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
+    chmod +x /usr/local/x-ui/x-ui.sh
+    chmod +x /usr/bin/x-ui
+    config_after_install
+
+    systemctl daemon-reload
+    systemctl enable x-ui
+    systemctl start x-ui
+    echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
+    echo -e ""
+    echo -e "┌───────────────────────────────────────────────────────┐
+│  x-ui control menu usages (subcommands):              │
+│                                                       │
+│  x-ui              - 显示管理主菜单（功能最全          │
+│  x-ui start        - 启动x-ui面板服务                             │
+│  x-ui stop         - 停止x-ui面板服务                             │
+│  x-ui restart      - 重启x-ui面板服务                           │
+│  x-ui status       - 查看x-ui运行状态                    │
+│  x-ui settings     - 查看当前配置（含登录凭证                  │
+│  x-ui enable       - 设置开机自动启动   │
+│  x-ui disable      - 取消开机自动启动  │
+│  x-ui log          - 查看实时运行日志                       │
+│  x-ui banlog       - 查看被封禁IP记录（Fail2ban日志）           │
+│  x-ui update       - 更新x-ui到最新版本                            │
+│  x-ui legacy       - 切换回旧版客户端                    │
+│  x-ui install      - 全新安装x-ui                           │
+│  x-ui uninstall    - 完全卸载x-ui                       │
+└───────────────────────────────────────────────────────┘"
+}
+
+echo -e "${green}Running...${plain}"
+install_base
+install_x-ui $1
