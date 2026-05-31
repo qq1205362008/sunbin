@@ -108,17 +108,13 @@ config_after_install() {
     /usr/local/x-ui/x-ui migrate
 }
 
-auto_create_reality() {
-    echo -e "${green}正在全自动生成随机密钥并为您创建超稳定 Reality 节点...${plain}"
+api_create_reality() {
+    echo -e "${green}正在通过官方 API 全自动为您创建超稳定 Reality 节点...${plain}"
     
     XRAY_BIN="/usr/local/x-ui/bin/xray-linux-$(arch)"
     [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]] && XRAY_BIN="/usr/local/x-ui/bin/xray-linux-arm"
     
-    if [[ ! -f "$XRAY_BIN" ]]; then
-        echo -e "${red}未找到 Xray 二进制文件，无法自动创建 Reality 节点。${plain}"
-        return 1
-    fi
-
+    # 1. 生成必要参数
     local random_uuid=$($XRAY_BIN uuid)
     local keys_output=$($XRAY_BIN x25519)
     local private_key=$(echo "$keys_output" | grep "Private key:" | awk '{print $3}')
@@ -127,50 +123,46 @@ auto_create_reality() {
     local port=443
     local sni="www.sony.com"
 
-    local settings_json="{\"clients\": [{\"id\": \"${random_uuid}\", \"flow\": \"xtls-rprx-vision\"}], \"decryption\": \"none\", \"fallbacks\": []}"
-    local stream_settings_json="{\"network\": \"tcp\", \"security\": \"reality\", \"realitySettings\": {\"show\": false, \"dest\": \"${sni}:443\", \"xver\": 0, \"serverNames\": [\"${sni}\"], \"privateKey\": \"${private_key}\", \"minClientVer\": \"\", \"maxClientVer\": \"\", \"maxTimeDiff\": 0, \"shortIds\": [\"${short_id}\"], \"settings\": {\"publicKey\": \"${public_key}\", \"fingerprint\": \"chrome\", \"serverName\": \"\", \"spiderX\": \"/\"}}}"
-    local sniffing_json="{\"enabled\": true, \"destOverride\": [\"http\", \"tls\", \"quic\"], \"metadataOnly\": false, \"routeOnly\": false}"
+    # 2. 模拟登录获取 Cookie
+    local cookie_file=$(mktemp)
+    curl -s -X POST "http://127.0.0.1:1399/login" \
+        -H "Content-Type: application/x-www-form-urlencoded" \
+        -c "$cookie_file" \
+        -d "username=1399&password=1399" > /dev/null
 
-    systemctl stop x-ui
-    
-    # 核心修复：如果 inbounds 表不存在，强制建立符合 3x-ui 结构的表
-    sqlite3 /etc/x-ui/x-ui.db <<EOF
-CREATE TABLE IF NOT EXISTS inbounds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    up INTEGER,
-    down INTEGER,
-    total INTEGER,
-    remark TEXT,
-    enable INTEGER,
-    expiry_time INTEGER,
-    listen TEXT,
-    port INTEGER,
-    protocol TEXT,
-    settings TEXT,
-    stream_settings TEXT,
-    tag TEXT,
-    sniffing TEXT
-);
-DELETE FROM inbounds WHERE port=${port};
-INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
-VALUES (1, 0, 0, 0, 'Reality-443-Auto', 1, 0, '', ${port}, 'vless', '${settings_json}', '${stream_settings_json}', 'inbound-${port}', '${sniffing_json}');
-EOF
+    # 3. 组装符合 3x-ui 最新规范的 JSON 串
+    local settings_json="{\"clients\":[{\"id\":\"${random_uuid}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
+    local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${sni}:443\",\"xver\":0,\"serverNames\":[\"${sni}\"],\"privateKey\":\"${private_key}\",\"minClientVer\":\"\",\"maxClientVer\":\"\",\"maxTimeDiff\":0,\"shortIds\":[\"${short_id}\"],\"settings\":{\"publicKey\":\"${public_key}\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\"}},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}"
+    local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
 
-    systemctl start x-ui
+    # 4. 通过 API 提交添加节点请求
+    local api_response=$(curl -s -X POST "http://127.0.0.1:1399/panel/api/inbounds/add" \
+        -b "$cookie_file" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"enable\": true,
+            \"remark\": \"Reality-443-Auto\",
+            \"port\": ${port},
+            \"protocol\": \"vless\",
+            \"settings\": \"$(echo "$settings_json" | sed 's/"/\\"/g')\",
+            \"streamSettings\": \"$(echo "$stream_settings_json" | sed 's/"/\\"/g')\",
+            \"sniffing\": \"$(echo "$sniffing_json" | sed 's/"/\\"/g')\"
+        }")
 
+    rm -f "$cookie_file"
+
+    # 5. 打印结果
     server_ip=$(curl -s https://api.ipify.org)
-    
     echo -e "###############################################"
-    echo -e "${green}Username: ${config_account}${plain}"
-    echo -e "${green}Password: ${config_password}${plain}"
-    echo -e "${green}Port: ${config_port}${plain}"
-    echo -e "${green}WebBasePath: ${config_webBasePath}${plain}"
-    echo -e "${green}Access URL: http://${server_ip}:${config_port}/${config_webBasePath}${plain}"
+    echo -e "${green}Username: 1399   Password: 1399   Port: 1399${plain}"
+    echo -e "${green}Access URL: http://${server_ip}:1399/${plain}"
     echo -e "-----------------------------------------------"
-    echo -e "${yellow}防封 Reality 节点已自动创建成功！(端口: ${port}, 伪装: ${sni})${plain}"
-    echo -e "${yellow}公私钥与UUID已由系统完全随机生成并绑定完毕。${plain}"
-    echo -e "${yellow}请直接登录面板，点击“入站列表 -> 操作 -> 二维码”扫码连接！${plain}"
+    if [[ "$api_response" == *"true"* ]]; then
+        echo -e "${green}🎉 Reality 节点已通过 API 完美创建成功！${plain}"
+        echo -e "${yellow}请刷新网页，你会看到公钥、私钥、目标全部整整齐齐地出现了！${plain}"
+    else
+        echo -e "${red}API 创建节点可能遇到兼容问题，请登录面板检查是否生成。${plain}"
+    fi
     echo -e "###############################################"
 }
 
@@ -245,7 +237,9 @@ install_x-ui() {
     systemctl enable x-ui
     systemctl start x-ui
     
-    auto_create_reality
+    # 休息2秒等待面板服务彻底就绪，然后调用API
+    sleep 2
+    api_create_reality
     
     echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
     echo -e ""
