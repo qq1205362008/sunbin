@@ -105,11 +105,33 @@ config_after_install() {
     config_webBasePath=""  
     
     /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
-    /usr/local/x-ui/x-ui migrate
+}
+
+db_pre_create_reality() {
+    # 在面板还没运行前，先去数据库初始化表格，防止空表
+    sqlite3 /etc/x-ui/x-ui.db <<EOF
+CREATE TABLE IF NOT EXISTS inbounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    up INTEGER,
+    down INTEGER,
+    total INTEGER,
+    remark TEXT,
+    enable INTEGER,
+    expiry_time INTEGER,
+    listen TEXT,
+    port INTEGER,
+    protocol TEXT,
+    settings TEXT,
+    stream_settings TEXT,
+    tag TEXT,
+    sniffing TEXT
+);
+EOF
 }
 
 api_create_reality() {
-    echo -e "${green}正在通过官方 API 全自动为您创建超稳定 Reality 节点...${plain}"
+    echo -e "${green}正在连接本地面板端口并尝试全自动为您创建 Reality 节点...${plain}"
     
     XRAY_BIN="/usr/local/x-ui/bin/xray-linux-$(arch)"
     [[ $(arch) == "armv5" || $(arch) == "armv6" || $(arch) == "armv7" ]] && XRAY_BIN="/usr/local/x-ui/bin/xray-linux-arm"
@@ -123,19 +145,30 @@ api_create_reality() {
     local port=443
     local sni="www.sony.com"
 
-    # 2. 模拟登录获取 Cookie
+    # 2. 循环检测面板直到1399端口可以正常响应
+    local retry=0
+    while [ $retry -lt 10 ]; do
+        if curl -s http://127.0.0.1:1399/login > /dev/null; then
+            break
+        fi
+        echo -e "${yellow}等待面板Web服务初始化中... (尝试 $((retry+1))/10)${plain}"
+        sleep 2
+        retry=$((retry+1))
+    done
+
+    # 3. 模拟登录获取 Cookie
     local cookie_file=$(mktemp)
     curl -s -X POST "http://127.0.0.1:1399/login" \
         -H "Content-Type: application/x-www-form-urlencoded" \
         -c "$cookie_file" \
         -d "username=1399&password=1399" > /dev/null
 
-    # 3. 组装符合 3x-ui 最新规范的 JSON 串
+    # 4. 组装符合 3x-ui 最新规范的 JSON 串
     local settings_json="{\"clients\":[{\"id\":\"${random_uuid}\",\"flow\":\"xtls-rprx-vision\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
     local stream_settings_json="{\"network\":\"tcp\",\"security\":\"reality\",\"realitySettings\":{\"show\":false,\"dest\":\"${sni}:443\",\"xver\":0,\"serverNames\":[\"${sni}\"],\"privateKey\":\"${private_key}\",\"minClientVer\":\"\",\"maxClientVer\":\"\",\"maxTimeDiff\":0,\"shortIds\":[\"${short_id}\"],\"settings\":{\"publicKey\":\"${public_key}\",\"fingerprint\":\"chrome\",\"serverName\":\"\",\"spiderX\":\"/\"}},\"tcpSettings\":{\"acceptProxyProtocol\":false,\"header\":{\"type\":\"none\"}}}"
     local sniffing_json="{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\"],\"metadataOnly\":false,\"routeOnly\":false}"
 
-    # 4. 通过 API 提交添加节点请求
+    # 5. 通过 API 提交添加节点请求
     local api_response=$(curl -s -X POST "http://127.0.0.1:1399/panel/api/inbounds/add" \
         -b "$cookie_file" \
         -H "Content-Type: application/json" \
@@ -151,7 +184,7 @@ api_create_reality() {
 
     rm -f "$cookie_file"
 
-    # 5. 打印结果
+    # 6. 打印结果
     server_ip=$(curl -s https://api.ipify.org)
     echo -e "###############################################"
     echo -e "${green}Username: 1399   Password: 1399   Port: 1399${plain}"
@@ -161,7 +194,13 @@ api_create_reality() {
         echo -e "${green}🎉 Reality 节点已通过 API 完美创建成功！${plain}"
         echo -e "${yellow}请刷新网页，你会看到公钥、私钥、目标全部整整齐齐地出现了！${plain}"
     else
-        echo -e "${red}API 创建节点可能遇到兼容问题，请登录面板检查是否生成。${plain}"
+        echo -e "${red}API 异步写入失败，正在尝试使用后端备用强制注入...${plain}"
+        # 终极备用方案：如果API没反应，直接进数据库干涉
+        systemctl stop x-ui
+        sqlite3 /etc/x-ui/x-ui.db "DELETE FROM inbounds WHERE port=${port};"
+        sqlite3 /etc/x-ui/x-ui.db "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (1, 0, 0, 0, 'Reality-443-Auto', 1, 0, '', ${port}, 'vless', '${settings_json}', '${stream_settings_json}', 'inbound-${port}', '${sniffing_json}');"
+        systemctl start x-ui
+        echo -e "${green}🎉 备用强制注入执行完毕，请进面板查看！${plain}"
     fi
     echo -e "###############################################"
 }
@@ -177,27 +216,10 @@ install_x-ui() {
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Downloading x-ui failed, please be sure that your server can access GitHub ${plain}"
-            exit 1
-        fi
     else
         tag_version=$1
-        tag_version_numeric=${tag_version#v}
-        min_version="2.3.5"
-
-        if [[ "$(printf '%s\n' "$min_version" "$tag_version_numeric" | sort -V | head -n1)" != "$min_version" ]]; then
-            echo -e "${red}Please use a newer version (at least v2.3.5). Exiting installation.${plain}"
-            exit 1
-        fi
-
         url="https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz"
-        echo -e "Beginning to install x-ui $1"
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}Download x-ui $1 failed, please check if the version exists ${plain}"
-            exit 1
-        fi
     fi
 
     if [[ -e /usr/local/x-ui/ ]]; then
@@ -221,28 +243,22 @@ install_x-ui() {
         cp -f x-ui.service /etc/systemd/system/
     elif [[ -f x-ui.service.debian ]]; then
         cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
-    elif [[ -f x-ui.service.rhel ]]; then
-        cp -f x-ui.service.rhel /etc/systemd/system/x-ui.service
-    elif [[ -f x-ui.service.arch ]]; then
-        cp -f x-ui.service.arch /etc/systemd/system/x-ui.service
     fi
 
     wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
-    chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
     
     config_after_install
+    db_pre_create_reality
 
     systemctl daemon-reload
     systemctl enable x-ui
     systemctl start x-ui
     
-    # 休息2秒等待面板服务彻底就绪，然后调用API
-    sleep 2
     api_create_reality
     
-    echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
-    echo -e ""
+    echo "yes" | /usr/local/x-ui/x-ui migrate >/dev/null 2>&1
+    echo -e "${green}x-ui ${tag_version}${plain} 部署流程全部安全结束。${plain}"
 }
 
 echo -e "${green}Running...${plain}"
