@@ -24,17 +24,14 @@ prl=$(grep PermitRootLogin /etc/ssh/sshd_config)
 pa=$(grep PasswordAuthentication /etc/ssh/sshd_config)
 
 if [[ -n $prl && -n $pa ]]; then
-    # 修改root密码和SSH配置
     mima=qq1399@
     echo "root:$mima" | $su chpasswd root
     $su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
     $su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
     $su service sshd restart
 else
-    # 非root用户报错
     [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain}Please run this script with root privilege\n" && exit 1
 
-    # 检测操作系统
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         release=$ID
@@ -68,7 +65,6 @@ check_glibc_version() {
     required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
-        echo "Please upgrade to a newer version of your operating system to get a higher GLIBC version."
         exit 1
     fi
     echo "GLIBC version: $glibc_version (meets requirement of 2.32+)"
@@ -99,36 +95,4 @@ install_base() {
 }
 
 config_after_install() {
-    config_account="1399"
-    config_password="1399"
-    config_port="1399"
-    config_webBasePath=""  
-    
-    /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
-}
-
-db_pre_create_reality() {
-    sqlite3 /etc/x-ui/x-ui.db <<EOF
-CREATE TABLE IF NOT EXISTS inbounds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER,
-    up INTEGER,
-    down INTEGER,
-    total INTEGER,
-    remark TEXT,
-    enable INTEGER,
-    expiry_time INTEGER,
-    listen TEXT,
-    port INTEGER,
-    protocol TEXT,
-    settings TEXT,
-    stream_settings TEXT,
-    tag TEXT,
-    sniffing TEXT
-);
-EOF
-}
-
-# ==================== 核心修改：针对魔改版扁平化 JSON 的全自动生成与注入 ====================
-api_create_reality() {
-    echo -e "${green}正在连接本地面板端口并尝试全自动为您创建集成了 MLDSA65 的 Reality 节点...${
+    config_account="
