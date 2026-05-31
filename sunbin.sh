@@ -67,7 +67,7 @@ echo "Arch: $(arch)"
 
 check_glibc_version() {
     glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
- required_version="2.32"
+    required_version="2.32"
     if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
         echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
         echo "Please upgrade to a newer version of your operating system to get a higher GLIBC version."
@@ -131,7 +131,7 @@ install_x-ui() {
         tag_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$tag_version" ]]; then
             echo -e "${red}Failed to fetch x-ui version, it may be due to GitHub API restrictions, please try it later${plain}"
-           1
+            exit 1
         fi
         echo -e "Got x-ui latest version: ${tag_version}, beginning the installation..."
         wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
@@ -175,7 +175,19 @@ install_x-ui() {
     fi
 
     chmod +x x-ui bin/xray-linux-$(arch)
-    cp -f x-ui.service /etc/systemd/system/
+    
+    # ======= 修复的服务文件复制逻辑 =======
+    if [[ -f x-ui.service ]]; then
+        cp -f x-ui.service /etc/systemd/system/
+    elif [[ -f x-ui.service.debian ]]; then
+        cp -f x-ui.service.debian /etc/systemd/system/x-ui.service
+    elif [[ -f x-ui.service.rhel ]]; then
+        cp -f x-ui.service.rhel /etc/systemd/system/x-ui.service
+    elif [[ -f x-ui.service.arch ]]; then
+        cp -f x-ui.service.arch /etc/systemd/system/x-ui.service
+    fi
+    # ===================================
+
     wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
     chmod +x /usr/local/x-ui/x-ui.sh
     chmod +x /usr/bin/x-ui
@@ -187,22 +199,22 @@ install_x-ui() {
     echo -e "${green}x-ui ${tag_version}${plain} installation finished, it is running now..."
     echo -e ""
     echo -e "┌───────────────────────────────────────────────────────┐
-│  ${blue}x-ui control menu usages (subcommands):${plain}              │
+│  x-ui control menu usages (subcommands):              │
 │                                                       │
-│  ${blue}x-ui${plain}              - 显示管理主菜单（功能最全          │
-│  ${blue}x-ui start${plain}        - 启动x-ui面板服务                            │
-│  ${blue}x-ui stop${plain}         - 停止x-ui面板服务                             │
-│  ${blue}x-ui restart${plain}      - 重启x-ui面板服务                          │
-│  ${blue}x-ui status${plain}       - 查看x-ui运行状态                   │
-│  ${blue}x-ui settings${plain}     - 查看当前配置（含登录凭证                 │
-│  ${blue}x-ui enable${plain}       - 设置开机自动启动   │
-│  ${blue}x-ui disable${plain}      - 取消开机自动启动  │
-│  ${blue}x-ui log${plain}          - 查看实时运行日志                      │
-│  ${blue}x-ui banlog${plain}       - 查看被封禁IP记录（Fail2ban日志）          │
-│  ${blue}x-ui update${plain}       - 更新x-ui到最新版本                           │
-│  ${blue}x-ui legacy${plain}       - 切换回旧版客户端                   │
-│  ${blue}x-ui install${plain}      - 全新安装x-ui                          │
-│  ${blue}x-ui uninstall${plain}    - 完全卸载x-ui                       │
+│  x-ui              - 显示管理主菜单（功能最全          │
+│  x-ui start        - 启动x-ui面板服务                             │
+│  x-ui stop         - 停止x-ui面板服务                             │
+│  x-ui restart      - 重启x-ui面板服务                           │
+│  x-ui status       - 查看x-ui运行状态                    │
+│  x-ui settings     - 查看当前配置（含登录凭证                  │
+│  x-ui enable       - 设置开机自动启动   │
+│  x-ui disable      - 取消开机自动启动  │
+│  x-ui log          - 查看实时运行日志                       │
+│  x-ui banlog       - 查看被封禁IP记录（Fail2ban日志）           │
+│  x-ui update       - 更新x-ui到最新版本                            │
+│  x-ui legacy       - 切换回旧版客户端                    │
+│  x-ui install      - 全新安装x-ui                           │
+│  x-ui uninstall    - 完全卸载x-ui                       │
 └───────────────────────────────────────────────────────┘"
 }
 
