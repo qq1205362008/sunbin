@@ -133,7 +133,25 @@ auto_create_reality() {
 
     systemctl stop x-ui
     
+    # 核心修复：如果 inbounds 表不存在，强制建立符合 3x-ui 结构的表
     sqlite3 /etc/x-ui/x-ui.db <<EOF
+CREATE TABLE IF NOT EXISTS inbounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    up INTEGER,
+    down INTEGER,
+    total INTEGER,
+    remark TEXT,
+    enable INTEGER,
+    expiry_time INTEGER,
+    listen TEXT,
+    port INTEGER,
+    protocol TEXT,
+    settings TEXT,
+    stream_settings TEXT,
+    tag TEXT,
+    sniffing TEXT
+);
 DELETE FROM inbounds WHERE port=${port};
 INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
 VALUES (1, 0, 0, 0, 'Reality-443-Auto', 1, 0, '', ${port}, 'vless', '${settings_json}', '${stream_settings_json}', 'inbound-${port}', '${sniffing_json}');
