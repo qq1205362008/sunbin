@@ -1,3 +1,4 @@
+#!/bash/bin
 #!/bin/bash
 
 # 颜色定义
@@ -78,22 +79,22 @@ check_glibc_version
 install_base() {
     case "${release}" in
     ubuntu | debian | armbian)
-        apt-get update && apt-get install -y -q wget curl tar tzdata sqlite3 python3
+        apt-get update && apt-get install -y -q wget curl tar tzdata sqlite3
         ;;
     centos | almalinux | rocky | ol)
-        yum -y update && yum install -y -q wget curl tar tzdata sqlite3 python3
+        yum -y update && yum install -y -q wget curl tar tzdata sqlite3
         ;;
     fedora | amzn | virtuozzo)
-        dnf -y update && dnf install -y -q wget curl tar tzdata sqlite3 python3
+        dnf -y update && dnf install -y -q wget curl tar tzdata sqlite3
         ;;
     arch | manjaro | parch)
-        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata sqlite3 python3
+        pacman -Syu && pacman -Syu --noconfirm wget curl tar tzdata sqlite3
         ;;
     opensuse-tumbleweed)
-        zypper refresh && zypper -q install -y wget curl tar timezone sqlite3 python3
+        zypper refresh && zypper -q install -y wget curl tar timezone sqlite3
         ;;
     *)
-        apt-get update && apt install -y -q wget curl tar tzdata sqlite3 python3
+        apt-get update && apt install -y -q wget curl tar tzdata sqlite3
         ;;
     esac
 }
@@ -110,18 +111,11 @@ config_after_install() {
     # 执行初始化数据库迁移
     /usr/local/x-ui/x-ui migrate
 
-    # ======= 核心修改：停止服务，直接通过底层数据库全自动生成后量子 Reality 节点 =======
-    echo -e "${green}正在停止服务以注入后量子 Reality 节点...${plain}"
-    systemctl stop x-ui
+    # 先清理可能冲突的旧443端口数据，保证一键安装的稳定性
+    if [ -f /etc/x-ui/x-ui.db ]; then
+        sqlite3 /etc/x-ui/x-ui.db "DELETE FROM inbounds WHERE port=443;"
+    fi
 
-    XRAY_BIN="/usr/local/x-ui/bin/xray-linux-$(arch)"
-    chmod +x "$XRAY_BIN"
-
-    # 生成普通 Reality 密钥
-    x25519_key=$($XRAY_BIN x25519 2>/dev/null)
-    private_key=$(echo "$x25519_key" | grep "Private key:" | awk '{print $3}')
-    public_key=$(echo "$x25519_key" | grep "Public key:" | awk '{print $3}')
-    short_id=$(openssl rand -hex 8)
-    client_id=$(cat /proc/sys/kernel/random/uuid)
-
-    # 生成 MLDSA65 后
+    # 利用面板自身的命令行创建基础 Reality 节点
+    echo -e "${green}正在自动为您创建基础 Reality 节点...${plain}"
+    /usr/local/x-ui/x-ui inbound -title "Reality-443-Auto" -port 443 -protocol v
